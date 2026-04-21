@@ -1,0 +1,7 @@
+.state/
+node_modules/
+config.json
+.codex
+npm-debug.log*
+yarn-error.log*
+.DS_Store

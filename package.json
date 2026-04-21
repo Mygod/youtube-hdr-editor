@@ -1,0 +1,24 @@
+{
+  "name": "youtube-hdr",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@1.22.22",
+  "type": "module",
+  "description": "Run-on-demand YouTube HDR/edit automation",
+  "bin": {
+    "youtube-hdr": "./src/cli.ts"
+  },
+  "scripts": {
+    "cli": "node --experimental-transform-types src/cli.ts",
+    "run-once": "node --experimental-transform-types src/cli.ts run",
+    "rerun": "node --experimental-transform-types src/cli.ts run --rerun",
+    "status": "node --experimental-transform-types src/cli.ts status",
+    "test": "node --experimental-transform-types --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=23"
+  },
+  "dependencies": {
+    "playwright-core": "^1.54.1"
+  }
+}

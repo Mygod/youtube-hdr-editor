@@ -1,0 +1,7 @@
+{
+  "browserName": "chromium",
+  "videoIds": [
+    "VIDEO_ID_1",
+    "VIDEO_ID_2"
+  ]
+}

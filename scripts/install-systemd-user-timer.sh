@@ -6,7 +6,13 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 USER_SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="youtube-hdr-editor"
 INTERVAL_MINUTES="${1:-10}"
+NODE_BIN="$(command -v node || true)"
 YARN_BIN="$(command -v yarn || true)"
+
+if [[ -z "${NODE_BIN}" ]]; then
+  echo "node was not found on PATH" >&2
+  exit 1
+fi
 
 if [[ -z "${YARN_BIN}" ]]; then
   echo "yarn was not found on PATH" >&2
@@ -22,6 +28,9 @@ mkdir -p "${USER_SYSTEMD_DIR}"
 
 SERVICE_PATH="${USER_SYSTEMD_DIR}/${UNIT_NAME}.service"
 TIMER_PATH="${USER_SYSTEMD_DIR}/${UNIT_NAME}.timer"
+NODE_DIR="$(dirname "${NODE_BIN}")"
+YARN_DIR="$(dirname "${YARN_BIN}")"
+RUNTIME_PATH="${YARN_DIR}:${NODE_DIR}:/usr/local/bin:/usr/bin:/bin"
 
 cat > "${SERVICE_PATH}" <<EOF
 [Unit]
@@ -31,6 +40,7 @@ After=default.target
 [Service]
 Type=oneshot
 WorkingDirectory=${REPO_DIR}
+Environment=PATH=${RUNTIME_PATH}
 ExecStart=${YARN_BIN} rerun
 Nice=10
 IOSchedulingClass=best-effort

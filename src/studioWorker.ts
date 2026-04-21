@@ -46,6 +46,20 @@ const INLINE_EDIT_SIGNAL_TOKENS = [
   "UPLOAD_CHECKS_DATA_SUMMARY_STATUS_INLINE_EDIT_IN_PROGRESS",
   "UPLOAD_CHECKS_DATA_COPYRIGHT_STATUS_INLINE_EDIT_IN_PROGRESS",
 ];
+const SHELL_SETTLE_TIMEOUT_MS = 200;
+const LOGIN_TIMEOUT_MS = 20_000;
+const DIRECT_EDITOR_READY_TIMEOUT_MS = 4_000;
+const EDITOR_READY_TIMEOUT_MS = 5_000;
+const CONTROL_DISCOVERY_TIMEOUT_MS = 4_000;
+const SAVE_ENABLE_TIMEOUT_MS = 7_500;
+const CONFIRM_DIALOG_VISIBLE_TIMEOUT_MS = 2_500;
+const CONFIRM_DIALOG_HIDDEN_TIMEOUT_MS = 4_000;
+const POST_SAVE_CONFIRMATION_TIMEOUT_MS = 20_000;
+const POST_SAVE_RELOAD_INTERVAL_MS = 5_000;
+const EDITOR_POLL_INTERVAL_MS = 250;
+const SAVE_POLL_INTERVAL_MS = 200;
+const CONTROL_POLL_INTERVAL_MS = 150;
+const PROCESSING_POLL_INTERVAL_MS = 500;
 
 export class StudioSession {
   readonly #browser?: Browser;
@@ -321,12 +335,12 @@ async function openDirectEditor(page: Page, url: string, timeoutMs: number): Pro
   if (await detectStudioProcessingState(page)) {
     return true;
   }
-  return await isEditorInteractive(page, 8_000);
+  return await isEditorInteractive(page, Math.min(timeoutMs, DIRECT_EDITOR_READY_TIMEOUT_MS));
 }
 
 async function ensureStudioShell(page: Page): Promise<void> {
   await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(SHELL_SETTLE_TIMEOUT_MS);
 }
 
 async function gotoStudioPage(page: Page, url: string, timeoutMs: number): Promise<void> {
@@ -345,13 +359,11 @@ async function waitForInteractiveLoginIfNeeded(page: Page, timeoutMs: number): P
     return;
   }
 
-  const deadline = Date.now() + Math.max(timeoutMs, 120_000);
-  while (Date.now() < deadline) {
-    if (!looksLikeGoogleLogin(page.url())) {
-      return;
-    }
-    await page.waitForTimeout(500);
-  }
+  await page
+    .waitForURL((url) => !looksLikeGoogleLogin(url.toString()), {
+      timeout: Math.max(timeoutMs, LOGIN_TIMEOUT_MS),
+    })
+    .catch(() => {});
 }
 
 function looksLikeGoogleLogin(url: string): boolean {
@@ -399,8 +411,7 @@ async function handleEditorPage(
     }
   }
 
-  logStage(videoId, "dismissing_warm_welcome");
-  await dismissWarmWelcomeIfPresent(page);
+  await dismissWarmWelcomeIfPresent(page, videoId);
 
   if (await detectStudioProcessingState(page)) {
     logStage(videoId, "processing_detected_after_welcome");
@@ -417,7 +428,7 @@ async function handleEditorPage(
   logStage(videoId, "clicking_trim_entry");
   await clickWithFallback(trimAndCut, videoId, "trim_entry");
   logStage(videoId, "finding_new_cut");
-  const newCut = await findNewCutButton(page, options.timeoutMs);
+  const newCut = await findNewCutButton(page, Math.min(options.timeoutMs, CONTROL_DISCOVERY_TIMEOUT_MS));
   if (!newCut) {
     diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "new-cut-missing")));
     return {
@@ -470,7 +481,7 @@ async function handleEditorPage(
   }
 
   logStage(videoId, "finding_cut_confirm");
-  const cutButton = await findCutButton(page, options.timeoutMs);
+  const cutButton = await findCutButton(page, Math.min(options.timeoutMs, CONTROL_DISCOVERY_TIMEOUT_MS));
   if (!cutButton) {
     diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "cut-confirm-missing")));
     return {
@@ -485,9 +496,8 @@ async function handleEditorPage(
   logStage(videoId, "clicking_cut_confirm");
   await clickWithFallback(cutButton, videoId, "cut_confirm");
 
-  const saveButton = locateSaveButton(page);
   logStage(videoId, "waiting_for_save_enabled");
-  const saveEnabled = await waitForSaveEnabled(page, saveButton, 7_500);
+  const saveEnabled = await waitForSaveEnabled(page, Math.min(options.timeoutMs, SAVE_ENABLE_TIMEOUT_MS));
   if (!saveEnabled) {
     diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "save-disabled")));
     return {
@@ -500,13 +510,14 @@ async function handleEditorPage(
     };
   }
 
+  const saveButton = locateSaveButton(page);
   logStage(videoId, "clicking_save");
   await clickWithFallback(saveButton, videoId, "save");
   logStage(videoId, "acknowledging_confirm_dialog");
   await acknowledgeAndConfirm(page, videoId);
 
   logStage(videoId, "waiting_for_processing_confirmation");
-  if (await waitForProcessingConfirmation(page, 90_000)) {
+  if (await waitForProcessingConfirmation(page, Math.min(options.timeoutMs, POST_SAVE_CONFIRMATION_TIMEOUT_MS))) {
     logStage(videoId, "processing_confirmed_after_save");
     return {
       studioPath,
@@ -570,38 +581,31 @@ async function evaluateCurrentEditorPage(
 }
 
 async function ensureEditorReady(page: Page): Promise<boolean> {
-  if (await isEditorInteractive(page, 10_000)) {
+  if (await isEditorInteractive(page, EDITOR_READY_TIMEOUT_MS)) {
     return true;
   }
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await ensureStudioShell(page);
   await dismissWarmWelcomeIfPresent(page);
-  return await isEditorInteractive(page, 10_000);
+  return await isEditorInteractive(page, EDITOR_READY_TIMEOUT_MS);
 }
 
 async function isEditorInteractive(page: Page, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  const selectors = [
-    page.locator("ytve-app.ready:not([is-processing])").first(),
-    page.locator("ytve-editor:not([editor-disabled])").first(),
-    page.locator("ytve-timeline").first(),
-    page.locator("ytve-toolbar ytcp-media-timestamp-input input").first(),
-  ];
-
-  while (Date.now() - start < timeoutMs) {
-    if (await detectStudioProcessingState(page)) {
-      return false;
-    }
-    for (const locator of selectors) {
-      if ((await locator.count()) > 0 && (await locator.isVisible().catch(() => false))) {
-        return true;
-      }
-    }
-    await page.waitForTimeout(400);
+  const locator = await waitForFirstVisibleLocator(
+    page,
+    [
+      "ytve-app.ready:not([is-processing])",
+      "ytve-editor:not([editor-disabled])",
+      "ytve-timeline",
+      "ytve-toolbar ytcp-media-timestamp-input input",
+    ],
+    timeoutMs,
+  );
+  if (!locator) {
+    return false;
   }
-
-  return false;
+  return !(await detectStudioProcessingState(page));
 }
 
 async function locateCutInputs(page: Page): Promise<Locator[]> {
@@ -677,22 +681,61 @@ async function readTimestampValue(locator: Locator): Promise<string> {
     .catch(() => "");
 }
 
-async function waitForSaveEnabled(page: Page, locator: Locator, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if ((await locator.count()) > 0 && (await locator.isEnabled().catch(() => false))) {
-      return true;
-    }
-    await page.waitForTimeout(300);
-  }
-  return false;
+async function waitForSaveEnabled(page: Page, timeoutMs: number): Promise<boolean> {
+  return await page
+    .evaluate(async ({ timeoutMs }) => {
+      const readEnabledState = (): boolean | null => {
+        const host = document.querySelector("#save-button");
+        if (!host) {
+          return null;
+        }
+
+        const target =
+          host.matches("button") ? host : host.querySelector("button") ?? host;
+        const disabled =
+          target.hasAttribute("disabled") ||
+          target.getAttribute("aria-disabled") === "true" ||
+          host.hasAttribute("disabled") ||
+          host.getAttribute("aria-disabled") === "true";
+        return !disabled;
+      };
+
+      const initialState = readEnabledState();
+      if (initialState === true) {
+        return true;
+      }
+
+      return await new Promise<boolean>((resolve) => {
+        const finish = (value: boolean) => {
+          observer.disconnect();
+          clearTimeout(timer);
+          resolve(value);
+        };
+
+        const observer = new MutationObserver(() => {
+          const enabled = readEnabledState();
+          if (enabled === true) {
+            finish(true);
+          }
+        });
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["disabled", "aria-disabled", "class"],
+        });
+
+        const timer = window.setTimeout(() => finish(false), timeoutMs);
+      });
+    }, { timeoutMs })
+    .catch(() => false);
 }
 
 async function acknowledgeAndConfirm(page: Page, videoId: string): Promise<void> {
   logStage(videoId, "waiting_for_confirm_dialog");
   const dialog = page.locator("tp-yt-paper-dialog:not([aria-hidden='true'])").last();
   const dialogVisible = await dialog
-    .waitFor({ state: "visible", timeout: 5_000 })
+    .waitFor({ state: "visible", timeout: CONFIRM_DIALOG_VISIBLE_TIMEOUT_MS })
     .then(() => true)
     .catch(() => false);
   if (!dialogVisible) {
@@ -725,41 +768,83 @@ async function acknowledgeAndConfirm(page: Page, videoId: string): Promise<void>
 
   logStage(videoId, "clicking_confirm_dialog_button");
   await clickWithFallback(confirmButton, videoId, "confirm_dialog_button");
-  await dialog.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  await dialog.waitFor({ state: "hidden", timeout: CONFIRM_DIALOG_HIDDEN_TIMEOUT_MS }).catch(() => {});
   logStage(videoId, "confirm_dialog_handled");
 }
 
-async function waitForProcessingSignal(page: Page, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await detectStudioProcessingState(page)) {
-      return true;
-    }
-    await page.waitForTimeout(500);
-  }
-  return false;
-}
-
 async function waitForProcessingConfirmation(page: Page, timeoutMs: number): Promise<boolean> {
-  const start = Date.now();
-  let nextReloadAt = start + 15_000;
-
-  while (Date.now() - start < timeoutMs) {
-    if (await detectStudioProcessingState(page)) {
-      return true;
-    }
-
-    if (Date.now() >= nextReloadAt) {
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await ensureStudioShell(page);
-      nextReloadAt += 15_000;
-      continue;
-    }
-
-    await page.waitForTimeout(1_000);
+  if (await detectStudioProcessingState(page)) {
+    return true;
   }
 
-  return await detectStudioProcessingState(page);
+  return await page
+    .evaluate(
+      async ({ timeoutMs, selectors, inlineTokens }) => {
+        const root = document.documentElement;
+        if (!root) {
+          return false;
+        }
+
+        const hasProcessingSignal = (): boolean => {
+          for (const selector of selectors) {
+            const element = document.querySelector(selector);
+            if (!element) {
+              continue;
+            }
+            const htmlElement = element as HTMLElement;
+            const style = window.getComputedStyle(htmlElement);
+            const rect = htmlElement.getBoundingClientRect();
+            if (
+              style.visibility !== "hidden" &&
+              style.display !== "none" &&
+              (rect.width > 0 || rect.height > 0)
+            ) {
+              return true;
+            }
+          }
+
+          const processingToast = document.querySelector("#processing-toast #message-container");
+          if (processingToast?.textContent?.trim()) {
+            return true;
+          }
+
+          const serialized = root.innerHTML;
+          return inlineTokens.some((token) => serialized.includes(token));
+        };
+
+        if (hasProcessingSignal()) {
+          return true;
+        }
+
+        return await new Promise<boolean>((resolve) => {
+          const finish = (value: boolean) => {
+            observer.disconnect();
+            clearTimeout(timer);
+            resolve(value);
+          };
+
+          const observer = new MutationObserver(() => {
+            if (hasProcessingSignal()) {
+              finish(true);
+            }
+          });
+          observer.observe(root, {
+            subtree: true,
+            childList: true,
+            characterData: true,
+            attributes: true,
+          });
+
+          const timer = window.setTimeout(() => finish(false), timeoutMs);
+        });
+      },
+      {
+        timeoutMs,
+        selectors: POST_SAVE_PROCESSING_SIGNAL_SELECTORS,
+        inlineTokens: INLINE_EDIT_SIGNAL_TOKENS,
+      },
+    )
+    .catch(() => false);
 }
 
 async function detectStudioProcessingState(page: Page): Promise<boolean> {
@@ -816,11 +901,11 @@ function locateCutButton(page: Page): Locator {
 
 function locateSaveButton(page: Page): Locator {
   return page
-    .locator("#save-button button:not([disabled]), #save-button:not([disabled]):not([aria-disabled='true'])")
+    .locator("#save-button button, #save-button")
     .first();
 }
 
-async function dismissWarmWelcomeIfPresent(page: Page): Promise<void> {
+async function dismissWarmWelcomeIfPresent(page: Page, videoId?: string): Promise<void> {
   const welcomeOverlay = page.locator("ytve-warm-welcome").first();
   if ((await welcomeOverlay.count()) === 0) {
     return;
@@ -834,10 +919,13 @@ async function dismissWarmWelcomeIfPresent(page: Page): Promise<void> {
     return;
   }
 
-  await clickWithFallback(welcomeButton, undefined, "warm_welcome");
-  await welcomeOverlay.waitFor({ state: "hidden", timeout: 3_000 }).catch(async () => {
-    await page.waitForTimeout(500);
+  if (videoId) {
+    logStage(videoId, "dismissing_warm_welcome");
+  }
+  await welcomeButton.click({ force: true, timeout: 300 }).catch(async () => {
+    await welcomeButton.click({ timeout: 300 }).catch(() => {});
   });
+  await welcomeOverlay.waitFor({ state: "hidden", timeout: 150 }).catch(() => {});
 }
 
 async function findTrimAndCutButton(page: Page): Promise<Locator | null> {
@@ -845,27 +933,11 @@ async function findTrimAndCutButton(page: Page): Promise<Locator | null> {
 }
 
 async function findNewCutButton(page: Page, timeoutMs: number): Promise<Locator | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const locator = await findFirstVisibleLocator(page, NEW_CUT_BUTTON_SELECTORS);
-    if (locator) {
-      return locator;
-    }
-    await page.waitForTimeout(250);
-  }
-  return null;
+  return await waitForFirstVisibleLocator(page, NEW_CUT_BUTTON_SELECTORS, timeoutMs);
 }
 
 async function findCutButton(page: Page, timeoutMs: number): Promise<Locator | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const locator = await findFirstVisibleLocator(page, APPROVE_CUT_BUTTON_SELECTORS);
-    if (locator) {
-      return locator;
-    }
-    await page.waitForTimeout(250);
-  }
-  return null;
+  return await waitForFirstVisibleLocator(page, APPROVE_CUT_BUTTON_SELECTORS, timeoutMs);
 }
 
 async function findFirstVisibleLocator(page: Page, selectors: string[]): Promise<Locator | null> {
@@ -879,6 +951,24 @@ async function findFirstVisibleLocator(page: Page, selectors: string[]): Promise
     }
   }
   return null;
+}
+
+async function waitForFirstVisibleLocator(
+  page: Page,
+  selectors: string[],
+  timeoutMs: number,
+): Promise<Locator | null> {
+  const attempts = selectors.map(async (selector) => {
+    const locator = page.locator(selector).first();
+    await locator.waitFor({ state: "visible", timeout: timeoutMs });
+    return locator;
+  });
+
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    return null;
+  }
 }
 
 async function findFirstVisibleScopedLocator(scope: Locator, selectors: string[]): Promise<Locator | null> {

@@ -50,6 +50,31 @@ Inspect the latest recorded run:
 yarn status --latest
 ```
 
+## Recurring Every 10 Minutes
+
+Install the bundled user-level `systemd` timer:
+
+```bash
+./scripts/install-systemd-user-timer.sh
+```
+
+That enables a `youtube-hdr-editor.timer` which runs `yarn rerun` every 10 minutes.
+
+Useful commands:
+
+```bash
+systemctl --user status youtube-hdr-editor.timer
+systemctl --user list-timers --all | grep youtube-hdr-editor
+systemctl --user start youtube-hdr-editor.service
+systemctl --user disable --now youtube-hdr-editor.timer
+```
+
+If you want it to keep running when you are logged out, also enable linger for your user:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
 ## How `--rerun` Works
 
 `yarn rerun` resumes the latest run by taking:

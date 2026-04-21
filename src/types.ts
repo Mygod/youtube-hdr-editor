@@ -2,7 +2,7 @@ export type PublicCheckStatus = "hdr_present" | "no_hdr" | "incomplete";
 
 export type BrowserEngine = "chromium" | "firefox";
 
-export type StudioPath = "skipped" | "direct_editor" | "content_list";
+export type StudioPath = "skipped" | "direct_editor";
 
 export type BadgeState = "hdr" | "non_hdr_only" | "unknown";
 

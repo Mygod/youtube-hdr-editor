@@ -141,7 +141,7 @@ export class StudioSession {
           return directResult;
         }
       }
-      return await evaluateDetailsPage(
+      return await evaluateCurrentEditorPage(
         page,
         videoId,
         this.#options,
@@ -367,7 +367,7 @@ async function handleEditorPage(
   videoId: string,
   options: StudioRunOptions,
   diagnostics: string[],
-  studioPath: "direct_editor" | "content_list",
+  studioPath: "direct_editor",
   badgeState: BadgeState = "unknown",
 ): Promise<StudioResult | null> {
   logStage(videoId, "entered_editor_page");
@@ -534,12 +534,12 @@ function locateEditorLink(page: Page): Locator {
   return page.locator('a[href*="/editor"]').first();
 }
 
-async function evaluateDetailsPage(
+async function evaluateCurrentEditorPage(
   page: Page,
   videoId: string,
   options: StudioRunOptions,
   diagnostics: string[],
-  studioPath: "direct_editor" | "content_list",
+  studioPath: "direct_editor",
 ): Promise<StudioResult> {
   if (await detectStudioProcessingState(page)) {
     return buildProcessingResult(studioPath, "unknown", diagnostics);
@@ -557,14 +557,14 @@ async function evaluateDetailsPage(
     return detailsResult;
   }
 
-  diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "details-no-editor")));
+  diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "editor-surface-no-editor")));
 
   return {
     studioPath,
     badgeState: "unknown",
     editorState: "not_available",
     finalStatus: "studio_not_available",
-    summary: "Editor controls were not available from the video details page.",
+    summary: "Editor controls were not available on the Studio editor surface.",
     diagnostics,
   };
 }
@@ -792,7 +792,7 @@ async function hasProcessingToastMessage(page: Page): Promise<boolean> {
 }
 
 function buildProcessingResult(
-  studioPath: "direct_editor" | "content_list",
+  studioPath: "direct_editor",
   badgeState: BadgeState,
   diagnostics: string[],
 ): StudioResult {

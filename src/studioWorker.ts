@@ -54,6 +54,7 @@ const CONTROL_DISCOVERY_TIMEOUT_MS = 4_000;
 const SAVE_ENABLE_TIMEOUT_MS = 7_500;
 const CONFIRM_DIALOG_VISIBLE_TIMEOUT_MS = 2_500;
 const CONFIRM_DIALOG_HIDDEN_TIMEOUT_MS = 4_000;
+const CONFIRM_DIALOG_APPLY_ENABLE_TIMEOUT_MS = 4_000;
 const POST_SAVE_CONFIRMATION_TIMEOUT_MS = 20_000;
 const POST_SAVE_RELOAD_INTERVAL_MS = 5_000;
 const EDITOR_POLL_INTERVAL_MS = 250;
@@ -744,32 +745,126 @@ async function acknowledgeAndConfirm(page: Page, videoId: string): Promise<void>
   }
 
   logStage(videoId, "confirm_dialog_visible");
-  const checkbox = await findFirstVisibleScopedLocator(dialog, [
-    "tp-yt-paper-checkbox",
-    "[role='checkbox']",
-  ]);
-  if (checkbox) {
+  const checkbox = await findConfirmDialogCheckbox(dialog);
+  if (checkbox && !(await isConfirmDialogCheckboxChecked(checkbox))) {
     logStage(videoId, "clicking_confirm_dialog_checkbox");
-    await clickWithFallback(checkbox, videoId, "confirm_dialog_checkbox");
+    await clickDialogControl(checkbox, videoId, "confirm_dialog_checkbox");
   }
 
-  const confirmButton = await findLastVisibleScopedLocator(dialog, [
-    ".footer ytcp-button:not([disabled]):not([aria-disabled='true']) button:not([disabled])",
-    ".footer ytcp-button:not([disabled]):not([aria-disabled='true'])",
-    ".footer button:not([disabled]):not([aria-disabled='true'])",
-    "ytcp-button:not([disabled]):not([aria-disabled='true']) button:not([disabled])",
-    "ytcp-button:not([disabled]):not([aria-disabled='true'])",
-    "button:not([disabled]):not([aria-disabled='true'])",
-  ]);
+  const confirmButtonEnabled = await waitForConfirmDialogApplyEnabled(
+    dialog,
+    CONFIRM_DIALOG_APPLY_ENABLE_TIMEOUT_MS,
+  );
+  if (!confirmButtonEnabled) {
+    logStage(videoId, "confirm_dialog_button_not_enabled");
+    return;
+  }
+
+  const confirmButton = await findConfirmDialogApplyButton(dialog);
   if (!confirmButton) {
     logStage(videoId, "confirm_dialog_button_missing");
     return;
   }
 
   logStage(videoId, "clicking_confirm_dialog_button");
-  await clickWithFallback(confirmButton, videoId, "confirm_dialog_button");
+  await clickDialogControl(confirmButton, videoId, "confirm_dialog_button");
   await dialog.waitFor({ state: "hidden", timeout: CONFIRM_DIALOG_HIDDEN_TIMEOUT_MS }).catch(() => {});
   logStage(videoId, "confirm_dialog_handled");
+}
+
+async function findConfirmDialogCheckbox(dialog: Locator): Promise<Locator | null> {
+  return await findFirstVisibleScopedLocator(dialog, [
+    "#confirm-checkbox #checkbox",
+    "#confirm-checkbox [role='checkbox']",
+    "#confirm-checkbox",
+    "tp-yt-paper-checkbox",
+    "[role='checkbox']",
+  ]);
+}
+
+async function isConfirmDialogCheckboxChecked(locator: Locator): Promise<boolean> {
+  return await locator
+    .evaluate((element) => {
+      const host =
+        element.closest("#confirm-checkbox") ??
+        element.closest("ytcp-checkbox-lit") ??
+        element.closest("tp-yt-paper-checkbox") ??
+        element;
+      const checkbox =
+        host.querySelector("[role='checkbox']") ??
+        (host.matches("[role='checkbox']") ? host : null);
+      if (!checkbox) {
+        return host.hasAttribute("checked") || host.getAttribute("aria-checked") === "true";
+      }
+      return (
+        checkbox.getAttribute("aria-checked") === "true" ||
+        host.hasAttribute("checked") ||
+        checkbox.hasAttribute("checked")
+      );
+    })
+    .catch(() => false);
+}
+
+async function waitForConfirmDialogApplyEnabled(dialog: Locator, timeoutMs: number): Promise<boolean> {
+  return await dialog
+    .evaluate(
+      async (element, { timeoutMs }) => {
+        const readEnabledState = (): boolean | null => {
+          const host = element.querySelector("#apply-button");
+          if (!host) {
+            return null;
+          }
+
+          const target =
+            host.matches("button") ? host : host.querySelector("button") ?? host;
+          const disabled =
+            target.hasAttribute("disabled") ||
+            target.getAttribute("aria-disabled") === "true" ||
+            host.hasAttribute("disabled") ||
+            host.getAttribute("aria-disabled") === "true";
+          return !disabled;
+        };
+
+        const initialState = readEnabledState();
+        if (initialState === true) {
+          return true;
+        }
+
+        return await new Promise<boolean>((resolve) => {
+          const finish = (value: boolean) => {
+            observer.disconnect();
+            clearTimeout(timer);
+            resolve(value);
+          };
+
+          const observer = new MutationObserver(() => {
+            const enabled = readEnabledState();
+            if (enabled === true) {
+              finish(true);
+            }
+          });
+          observer.observe(element, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ["disabled", "aria-disabled", "class", "checked", "aria-checked"],
+          });
+
+          const timer = window.setTimeout(() => finish(false), timeoutMs);
+        });
+      },
+      { timeoutMs },
+    )
+    .catch(() => false);
+}
+
+async function findConfirmDialogApplyButton(dialog: Locator): Promise<Locator | null> {
+  return await findFirstVisibleScopedLocator(dialog, [
+    "#apply-button button:not([disabled]):not([aria-disabled='true'])",
+    "#apply-button:not([disabled]):not([aria-disabled='true'])",
+    ".footer #apply-button button:not([disabled]):not([aria-disabled='true'])",
+    ".footer #apply-button:not([disabled]):not([aria-disabled='true'])",
+  ]);
 }
 
 async function waitForProcessingConfirmation(page: Page, timeoutMs: number): Promise<boolean> {
@@ -1013,6 +1108,43 @@ async function clickWithFallback(
     await locator.click({ force: true, timeout: 3_000 }).catch(() => {
       throw error;
     });
+  }
+}
+
+async function clickDialogControl(
+  locator: Locator,
+  videoId: string | undefined,
+  label: string,
+): Promise<void> {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: 1_500 });
+  } catch (error) {
+    if (videoId) {
+      logStage(videoId, `${label}_normal_click_failed`);
+    }
+    try {
+      await locator.click({ force: true, timeout: 1_500 });
+      return;
+    } catch {
+      if (videoId) {
+        logStage(videoId, `${label}_force_click_failed`);
+      }
+    }
+    await locator
+      .evaluate((element) => {
+        const target =
+          element.matches("button,[role='button'],[role='checkbox']") ?
+            element :
+            element.querySelector("button,[role='button'],[role='checkbox']");
+        if (!(target instanceof HTMLElement)) {
+          throw new Error("Dialog control target was not clickable.");
+        }
+        target.click();
+      })
+      .catch(() => {
+        throw error;
+      });
   }
 }
 

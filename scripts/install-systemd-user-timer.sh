@@ -8,6 +8,7 @@ UNIT_NAME="youtube-hdr-editor"
 INTERVAL_MINUTES="${1:-10}"
 NODE_BIN="$(command -v node || true)"
 YARN_BIN="$(command -v yarn || true)"
+YT_DLP_BIN="$(command -v yt-dlp || true)"
 
 if [[ -z "${NODE_BIN}" ]]; then
   echo "node was not found on PATH" >&2
@@ -16,6 +17,11 @@ fi
 
 if [[ -z "${YARN_BIN}" ]]; then
   echo "yarn was not found on PATH" >&2
+  exit 1
+fi
+
+if [[ -z "${YT_DLP_BIN}" ]]; then
+  echo "yt-dlp was not found on PATH" >&2
   exit 1
 fi
 
@@ -30,7 +36,8 @@ SERVICE_PATH="${USER_SYSTEMD_DIR}/${UNIT_NAME}.service"
 TIMER_PATH="${USER_SYSTEMD_DIR}/${UNIT_NAME}.timer"
 NODE_DIR="$(dirname "${NODE_BIN}")"
 YARN_DIR="$(dirname "${YARN_BIN}")"
-RUNTIME_PATH="${YARN_DIR}:${NODE_DIR}:/usr/local/bin:/usr/bin:/bin"
+YT_DLP_DIR="$(dirname "${YT_DLP_BIN}")"
+RUNTIME_PATH="${YT_DLP_DIR}:${YARN_DIR}:${NODE_DIR}:/usr/local/bin:/usr/bin:/bin"
 
 cat > "${SERVICE_PATH}" <<EOF
 [Unit]

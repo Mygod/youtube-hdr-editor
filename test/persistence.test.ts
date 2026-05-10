@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { Persistence } from "../src/persistence.ts";
 
-test("Persistence rerun helpers return unresolved and unreached video ids", async () => {
+test("Persistence records requested video ids with each run", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "youtube-hdr-db-"));
   const dbPath = path.join(tempDir, "youtube-hdr.sqlite");
   const db = await Persistence.open(dbPath);
@@ -50,7 +50,10 @@ test("Persistence rerun helpers return unresolved and unreached video ids", asyn
     });
 
     assert.deepEqual(db.getLatestRun()?.requestedVideoIds, ["aaa111", "bbb222", "ccc333"]);
-    assert.deepEqual(db.getUnfinishedVideoIds(runId), ["bbb222", "ccc333"]);
+    assert.deepEqual(
+      db.getVideoResults(runId).map((result) => result.videoId),
+      ["aaa111", "bbb222"],
+    );
   } finally {
     db.close();
   }

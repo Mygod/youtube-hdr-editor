@@ -200,6 +200,10 @@ export function parseArgs(argv: string[], defaults: RuntimeDefaults = buildBuilt
     }
   }
 
+  if (parsed.headless && !connectUrlExplicit) {
+    parsed.browserConnectUrl = undefined;
+  }
+
   if (parsed.rerun && (videoIdsExplicit || filePathExplicit)) {
     throw new Error("--rerun cannot be combined with --videos or --file.");
   }
@@ -222,7 +226,7 @@ export function helpText(): string {
     "",
     "Options:",
     "  --config <path>        Root config file (default: ./config.json)",
-    "  --rerun               Rerun latest unresolved videos from SQLite, then fall back to config.json videoIds",
+    "  --rerun               Run config-backed default video IDs",
     "  --channel <id>         Optional YouTube channel id override",
     "  --browser <name>       Browser engine: chromium or firefox",
     "  --browser-executable <path>  Browser executable override",

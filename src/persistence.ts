@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { UNFINISHED_FINAL_STATUSES } from "./constants.ts";
 import { ensureDir } from "./fs-utils.ts";
 import type { RunRecord, VideoResult } from "./types.ts";
 
@@ -175,23 +174,6 @@ export class Persistence {
       })) as VideoResult[];
   }
 
-  getUnfinishedVideoIds(runId: number): string[] {
-    const run = this.getRun(runId);
-    if (!run) {
-      return [];
-    }
-
-    const resultsByVideoId = new Map(
-      this.getVideoResults(runId).map((result) => [result.videoId, result]),
-    );
-    const requestedVideoIds =
-      run.requestedVideoIds.length > 0 ? run.requestedVideoIds : [...resultsByVideoId.keys()];
-
-    return requestedVideoIds.filter((videoId) => {
-      const result = resultsByVideoId.get(videoId);
-      return !result || UNFINISHED_FINAL_STATUSES.has(result.finalStatus);
-    });
-  }
 }
 
 function parseRequestedVideoIds(value: unknown): string[] {

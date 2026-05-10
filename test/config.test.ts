@@ -35,3 +35,21 @@ test("loadRuntimeDefaults merges config.json values", async () => {
   assert.equal(defaults.timeoutMs, 12345);
   assert.equal(defaults.headless, true);
 });
+
+test("loadRuntimeDefaults does not auto-attach when config requests headless", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "youtube-hdr-config-"));
+  const configPath = path.join(tempDir, "config.json");
+
+  await fs.writeFile(
+    configPath,
+    JSON.stringify({
+      headless: true,
+    }),
+    "utf8",
+  );
+
+  const { defaults } = await loadRuntimeDefaults(configPath);
+
+  assert.equal(defaults.headless, true);
+  assert.equal(defaults.browserConnectUrl, undefined);
+});

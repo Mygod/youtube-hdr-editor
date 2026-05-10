@@ -15,9 +15,3 @@ export const PUBLIC_INCOMPLETE_PATTERNS = [
   "No video formats found",
   "Some formats may be missing",
 ];
-
-export const UNFINISHED_FINAL_STATUSES = new Set([
-  "automation_error",
-  "save_submitted_unverified",
-  "studio_not_available",
-]);

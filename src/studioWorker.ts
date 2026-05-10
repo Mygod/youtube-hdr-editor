@@ -10,6 +10,8 @@ const CHROMIUM_IGNORED_DEFAULT_ARGS = [
   "--disable-sync",
   "--password-store=basic",
 ];
+const CHROMIUM_STUDIO_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.101 Safari/537.36";
 const ENABLED_BUTTON_SELECTOR = "button:not([disabled]):not([aria-disabled='true'])";
 const ACTIONABLE_HOST_SELECTOR = "[role='button']:not([aria-disabled='true']):not([disabled])";
 const TRIM_ENTRYPOINT_SELECTORS = [
@@ -107,6 +109,7 @@ export class StudioSession {
       const context = await browserType.launchPersistentContext(options.profileDir, {
         executablePath: options.browserExecutablePath,
         headless: options.headless,
+        userAgent: browserType === chromium ? CHROMIUM_STUDIO_USER_AGENT : undefined,
         viewport: { width: 1440, height: 1000 },
         ignoreDefaultArgs: browserType === chromium ? CHROMIUM_IGNORED_DEFAULT_ARGS : undefined,
       });
@@ -134,7 +137,7 @@ export class StudioSession {
 
   async run(videoId: string): Promise<StudioResult> {
     const diagnostics: string[] = [];
-    const directEditorUrl = `https://studio.youtube.com/video/${videoId}/editor`;
+    const directEditorUrl = buildStudioEditorUrl(videoId);
     const page = this.#page;
 
     try {
@@ -231,6 +234,10 @@ async function resolveChromiumAttachUrl(
 
   if (options.browserConnectUrl) {
     return options.browserConnectUrl;
+  }
+
+  if (options.headless) {
+    return undefined;
   }
 
   if (options.profileDir) {
@@ -347,12 +354,25 @@ async function ensureStudioShell(page: Page): Promise<void> {
 async function gotoStudioPage(page: Page, url: string, timeoutMs: number): Promise<void> {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await waitForInteractiveLoginIfNeeded(page, timeoutMs);
+  await passUnsupportedBrowserGateIfPresent(page);
 
   if (!isStudioUrl(page.url())) {
     await page.goto(url, { waitUntil: "domcontentloaded" });
+    await waitForInteractiveLoginIfNeeded(page, timeoutMs);
+    await passUnsupportedBrowserGateIfPresent(page);
   }
 
   await ensureStudioShell(page);
+}
+
+async function passUnsupportedBrowserGateIfPresent(page: Page): Promise<void> {
+  const bypassLink = page.locator('a[href*="approve_browser_access=true"]').first();
+  const href = await bypassLink.getAttribute("href").catch(() => null);
+  if (!href) {
+    return;
+  }
+
+  await page.goto(new URL(href, page.url()).toString(), { waitUntil: "domcontentloaded" }).catch(() => {});
 }
 
 async function waitForInteractiveLoginIfNeeded(page: Page, timeoutMs: number): Promise<void> {
@@ -373,6 +393,12 @@ function looksLikeGoogleLogin(url: string): boolean {
 
 function isStudioUrl(url: string): boolean {
   return /^https:\/\/studio\.youtube\.com\/video\/[^/]+\/editor(?:[/?#]|$)/i.test(url);
+}
+
+export function buildStudioEditorUrl(videoId: string): string {
+  const url = new URL(`https://studio.youtube.com/video/${videoId}/editor`);
+  url.searchParams.set("approve_browser_access", "true");
+  return url.toString();
 }
 
 async function handleEditorPage(
@@ -1213,6 +1239,7 @@ async function captureDiagnostics(
         url: page.url(),
         title: await page.title().catch(() => ""),
         capturedAt: new Date().toISOString(),
+        userAgent: await page.evaluate(() => navigator.userAgent).catch(() => ""),
         bodyTextSnippet: bodyText.slice(0, 4_000),
         visibleButtons,
         visibleLinks,

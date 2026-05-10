@@ -103,3 +103,46 @@ test("parseArgs supports rerun with config-backed default video ids", () => {
   assert.equal(args.rerun, true);
   assert.deepEqual(args.videoIds, ["abc123", "def456"]);
 });
+
+test("parseArgs does not auto-attach when headless is requested", () => {
+  const defaults: RuntimeDefaults = {
+    videoIds: [],
+    channelId: undefined,
+    browserName: "chromium",
+    browserExecutablePath: "/usr/bin/chromium",
+    profileDir: "/tmp/chromium-profile",
+    browserConnectUrl: "http://127.0.0.1:9222",
+    dbPath: "/tmp/youtube-hdr.sqlite",
+    headless: false,
+    timeoutMs: 30000,
+    diagnosticsDir: "/tmp/diagnostics",
+  };
+
+  const args = parseArgs(["run", "--videos", "abc123", "--headless"], defaults);
+
+  assert.equal(args.headless, true);
+  assert.equal(args.browserConnectUrl, undefined);
+});
+
+test("parseArgs keeps explicitly requested attach URL in headless mode", () => {
+  const defaults: RuntimeDefaults = {
+    videoIds: [],
+    channelId: undefined,
+    browserName: "chromium",
+    browserExecutablePath: "/usr/bin/chromium",
+    profileDir: "/tmp/chromium-profile",
+    browserConnectUrl: "http://127.0.0.1:9222",
+    dbPath: "/tmp/youtube-hdr.sqlite",
+    headless: false,
+    timeoutMs: 30000,
+    diagnosticsDir: "/tmp/diagnostics",
+  };
+
+  const args = parseArgs(
+    ["run", "--videos", "abc123", "--headless", "--browser-connect-url", "http://127.0.0.1:9333"],
+    defaults,
+  );
+
+  assert.equal(args.headless, true);
+  assert.equal(args.browserConnectUrl, "http://127.0.0.1:9333");
+});

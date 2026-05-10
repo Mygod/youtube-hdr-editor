@@ -10,7 +10,6 @@ import {
 } from "./browserPreferences.ts";
 import { findRequestedConfigPath, loadRuntimeDefaults } from "./config.ts";
 import { readVideoIdsFromFile } from "./fs-utils.ts";
-import { Persistence } from "./persistence.ts";
 import { runBatch } from "./runner.ts";
 import { renderStatus } from "./status.ts";
 
@@ -27,7 +26,8 @@ async function main(): Promise<void> {
     }
 
     const browserConnectUrl =
-      args.browserConnectUrl ?? discoverBrowserConnectUrl(args.browserName, args.profileDir);
+      args.browserConnectUrl ??
+      (args.headless ? undefined : discoverBrowserConnectUrl(args.browserName, args.profileDir));
     if (browserConnectUrl && args.browserName !== "chromium") {
       throw new Error("browserConnectUrl / --browser-connect-url is only supported for Chromium.");
     }
@@ -90,26 +90,5 @@ async function main(): Promise<void> {
 await main();
 
 async function resolveInputVideoIds(args: ReturnType<typeof parseArgs>): Promise<string[]> {
-  if (!args.rerun) {
-    return args.filePath ? await readVideoIdsFromFile(args.filePath) : args.videoIds;
-  }
-
-  const db = await Persistence.open(args.dbPath);
-  try {
-    const latestRun = db.getLatestRun();
-    if (latestRun) {
-      const unfinishedVideoIds = db.getUnfinishedVideoIds(latestRun.id);
-      if (unfinishedVideoIds.length > 0) {
-        console.log(`Rerunning ${unfinishedVideoIds.length} unresolved video(s) from Run #${latestRun.id}.`);
-        return unfinishedVideoIds;
-      }
-      console.log(`Run #${latestRun.id} has no unresolved videos; falling back to configured defaults.`);
-    } else {
-      console.log("No previous runs found; using configured default video IDs.");
-    }
-  } finally {
-    db.close();
-  }
-
-  return args.videoIds;
+  return args.filePath ? await readVideoIdsFromFile(args.filePath) : args.videoIds;
 }

@@ -163,6 +163,10 @@ function applyConfigFile(
     next.headless = rawConfig.headless;
   }
 
+  if (next.headless && rawConfig.browserConnectUrl === undefined) {
+    next.browserConnectUrl = undefined;
+  }
+
   if (rawConfig.timeoutMs !== undefined) {
     if (typeof rawConfig.timeoutMs !== "number" || !Number.isFinite(rawConfig.timeoutMs) || rawConfig.timeoutMs <= 0) {
       throw new Error("Config field timeoutMs must be a positive number.");

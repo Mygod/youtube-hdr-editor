@@ -367,7 +367,12 @@ async function gotoStudioPage(page: Page, url: string, timeoutMs: number): Promi
 
 async function passUnsupportedBrowserGateIfPresent(page: Page): Promise<void> {
   const bypassLink = page.locator('a[href*="approve_browser_access=true"]').first();
-  const href = await bypassLink.getAttribute("href").catch(() => null);
+  // Locator#getAttribute waits for a missing locator by default; the gate is rare, so check presence first.
+  if ((await bypassLink.count().catch(() => 0)) === 0) {
+    return;
+  }
+
+  const href = await bypassLink.getAttribute("href", { timeout: 500 }).catch(() => null);
   if (!href) {
     return;
   }

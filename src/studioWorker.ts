@@ -1237,7 +1237,7 @@ async function clickDialogControl(
 }
 
 function logStage(videoId: string, stage: string): void {
-  console.log(`[studio:${videoId}] ${stage}`);
+  console.log(`${new Date().toISOString()} [studio:${videoId}] ${stage}`);
 }
 
 async function countVisibleSelectors(page: Page, selectors: string[]): Promise<number> {

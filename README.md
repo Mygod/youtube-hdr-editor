@@ -44,6 +44,12 @@ Run the full `config.json.videoIds` batch:
 yarn rerun
 ```
 
+Run that batch with a visible browser, overriding `config.json` headless mode:
+
+```bash
+yarn rerun -- --no-headless
+```
+
 Inspect the latest recorded run:
 
 ```bash

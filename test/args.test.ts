@@ -146,3 +146,22 @@ test("parseArgs keeps explicitly requested attach URL in headless mode", () => {
   assert.equal(args.headless, true);
   assert.equal(args.browserConnectUrl, "http://127.0.0.1:9333");
 });
+
+test("parseArgs supports forcing headful mode over configured headless default", () => {
+  const defaults: RuntimeDefaults = {
+    videoIds: ["abc123"],
+    channelId: undefined,
+    browserName: "chromium",
+    browserExecutablePath: "/usr/bin/chromium",
+    profileDir: "/tmp/chromium-profile",
+    browserConnectUrl: undefined,
+    dbPath: "/tmp/youtube-hdr.sqlite",
+    headless: true,
+    timeoutMs: 30000,
+    diagnosticsDir: "/tmp/diagnostics",
+  };
+
+  const args = parseArgs(["run", "--rerun", "--no-headless"], defaults);
+
+  assert.equal(args.headless, false);
+});

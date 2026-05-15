@@ -186,6 +186,9 @@ export function parseArgs(argv: string[], defaults: RuntimeDefaults = buildBuilt
       case "--headless":
         parsed.headless = true;
         break;
+      case "--no-headless":
+        parsed.headless = false;
+        break;
       case "--no-diagnostics":
         parsed.diagnosticsDir = undefined;
         break;
@@ -237,6 +240,7 @@ export function helpText(): string {
     "  --db <path>            SQLite database path",
     "  --timeout-ms <ms>      Per-video Studio timeout",
     "  --headless             Run Studio automation headless",
+    "  --no-headless          Run Studio automation with a visible browser",
     "  --no-diagnostics       Disable on-failure diagnostics capture",
     "  --latest               Show only the latest run in status",
   ].join("\n");

@@ -50,6 +50,7 @@ const INLINE_EDIT_SIGNAL_TOKENS = [
 ];
 const SHELL_SETTLE_TIMEOUT_MS = 200;
 const LOGIN_TIMEOUT_MS = 20_000;
+const SIGN_IN_PROMPT_TIMEOUT_MS = 500;
 const DIRECT_EDITOR_READY_TIMEOUT_MS = 4_000;
 const EDITOR_READY_TIMEOUT_MS = 5_000;
 const CONTROL_DISCOVERY_TIMEOUT_MS = 4_000;
@@ -63,6 +64,8 @@ const EDITOR_POLL_INTERVAL_MS = 250;
 const SAVE_POLL_INTERVAL_MS = 200;
 const CONTROL_POLL_INTERVAL_MS = 150;
 const PROCESSING_POLL_INTERVAL_MS = 500;
+
+type DirectEditorState = "ready" | "not_ready" | "sign_in_required";
 
 export class StudioSession {
   readonly #browser?: Browser;
@@ -146,8 +149,11 @@ export class StudioSession {
       }
       page.setDefaultTimeout(this.#options.timeoutMs);
 
-      const directReady = await openDirectEditor(page, directEditorUrl, this.#options.timeoutMs);
-      if (directReady) {
+      const directState = await openDirectEditor(page, directEditorUrl, this.#options);
+      if (directState === "sign_in_required") {
+        return await buildSignInRequiredResult(page, videoId, this.#options, diagnostics);
+      }
+      if (directState === "ready") {
         const directResult = await handleEditorPage(
           page,
           videoId,
@@ -338,12 +344,20 @@ async function isReachableChromiumDebugEndpoint(connectUrl: string): Promise<boo
   }
 }
 
-async function openDirectEditor(page: Page, url: string, timeoutMs: number): Promise<boolean> {
-  await gotoStudioPage(page, url, timeoutMs);
-  if (await detectStudioProcessingState(page)) {
-    return true;
+async function openDirectEditor(
+  page: Page,
+  url: string,
+  options: StudioRunOptions,
+): Promise<DirectEditorState> {
+  await gotoStudioPage(page, url, options);
+  if (await detectSignInRequired(page)) {
+    return "sign_in_required";
   }
-  return await isEditorInteractive(page, Math.min(timeoutMs, DIRECT_EDITOR_READY_TIMEOUT_MS));
+  if (await detectStudioProcessingState(page)) {
+    return "ready";
+  }
+  const ready = await isEditorInteractive(page, Math.min(options.timeoutMs, DIRECT_EDITOR_READY_TIMEOUT_MS));
+  return ready ? "ready" : "not_ready";
 }
 
 async function ensureStudioShell(page: Page): Promise<void> {
@@ -351,14 +365,14 @@ async function ensureStudioShell(page: Page): Promise<void> {
   await page.waitForTimeout(SHELL_SETTLE_TIMEOUT_MS);
 }
 
-async function gotoStudioPage(page: Page, url: string, timeoutMs: number): Promise<void> {
+async function gotoStudioPage(page: Page, url: string, options: StudioRunOptions): Promise<void> {
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await waitForInteractiveLoginIfNeeded(page, timeoutMs);
+  await waitForInteractiveLoginIfNeeded(page, options);
   await passUnsupportedBrowserGateIfPresent(page);
 
-  if (!isStudioUrl(page.url())) {
+  if (!isStudioUrl(page.url()) && !(await detectSignInRequired(page))) {
     await page.goto(url, { waitUntil: "domcontentloaded" });
-    await waitForInteractiveLoginIfNeeded(page, timeoutMs);
+    await waitForInteractiveLoginIfNeeded(page, options);
     await passUnsupportedBrowserGateIfPresent(page);
   }
 
@@ -380,20 +394,39 @@ async function passUnsupportedBrowserGateIfPresent(page: Page): Promise<void> {
   await page.goto(new URL(href, page.url()).toString(), { waitUntil: "domcontentloaded" }).catch(() => {});
 }
 
-async function waitForInteractiveLoginIfNeeded(page: Page, timeoutMs: number): Promise<void> {
-  if (!looksLikeGoogleLogin(page.url())) {
+async function waitForInteractiveLoginIfNeeded(page: Page, options: StudioRunOptions): Promise<void> {
+  if (!isSignInRequiredUrl(page.url()) || options.headless) {
     return;
   }
 
   await page
-    .waitForURL((url) => !looksLikeGoogleLogin(url.toString()), {
-      timeout: Math.max(timeoutMs, LOGIN_TIMEOUT_MS),
+    .waitForURL((url) => !isSignInRequiredUrl(url.toString()), {
+      timeout: Math.max(options.timeoutMs, LOGIN_TIMEOUT_MS),
     })
     .catch(() => {});
 }
 
-function looksLikeGoogleLogin(url: string): boolean {
+export function isSignInRequiredUrl(url: string): boolean {
   return /accounts\.google\.com|accounts\.youtube\.com|\/ServiceLogin\b|\/signin\b/i.test(url);
+}
+
+export function hasYouTubeSignInPrompt(bodyText: string): boolean {
+  const normalized = bodyText.replace(/\s+/g, " ").trim();
+  return /\bsign in\b/i.test(normalized) &&
+    /\bto continue to youtube\b/i.test(normalized) &&
+    /\bemail or phone\b/i.test(normalized);
+}
+
+async function detectSignInRequired(page: Page): Promise<boolean> {
+  if (isSignInRequiredUrl(page.url())) {
+    return true;
+  }
+
+  const bodyText = await page
+    .locator("body")
+    .innerText({ timeout: SIGN_IN_PROMPT_TIMEOUT_MS })
+    .catch(() => "");
+  return hasYouTubeSignInPrompt(bodyText);
 }
 
 function isStudioUrl(url: string): boolean {
@@ -415,6 +448,9 @@ async function handleEditorPage(
   badgeState: BadgeState = "unknown",
 ): Promise<StudioResult | null> {
   logStage(videoId, "entered_editor_page");
+  if (await detectSignInRequired(page)) {
+    return await buildSignInRequiredResult(page, videoId, options, diagnostics);
+  }
   if (await detectStudioProcessingState(page)) {
     logStage(videoId, "processing_detected_before_edit");
     return buildProcessingResult(studioPath, badgeState, diagnostics);
@@ -584,6 +620,10 @@ async function evaluateCurrentEditorPage(
   diagnostics: string[],
   studioPath: "direct_editor",
 ): Promise<StudioResult> {
+  if (await detectSignInRequired(page)) {
+    return await buildSignInRequiredResult(page, videoId, options, diagnostics);
+  }
+
   if (await detectStudioProcessingState(page)) {
     return buildProcessingResult(studioPath, "unknown", diagnostics);
   }
@@ -1013,6 +1053,23 @@ function buildProcessingResult(
     editorState: "not_entered",
     finalStatus: "processing_pending_edits",
     summary: "Studio indicates the video edit is still processing.",
+    diagnostics,
+  };
+}
+
+async function buildSignInRequiredResult(
+  page: Page,
+  videoId: string,
+  options: StudioRunOptions,
+  diagnostics: string[],
+): Promise<StudioResult> {
+  diagnostics.push(...(await maybeCaptureDiagnostics(page, videoId, options, "sign-in-required")));
+  return {
+    studioPath: "direct_editor",
+    badgeState: "unknown",
+    editorState: "not_entered",
+    finalStatus: "studio_sign_in_required",
+    summary: "Studio redirected to sign-in; the browser profile is not authenticated.",
     diagnostics,
   };
 }

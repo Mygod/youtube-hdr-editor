@@ -20,6 +20,7 @@ export type FinalStatus =
   | "processing_after_save"
   | "one_frame_trim_not_actionable"
   | "save_submitted_unverified"
+  | "studio_sign_in_required"
   | "studio_not_available"
   | "automation_error";
 
